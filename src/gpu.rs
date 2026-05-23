@@ -11,6 +11,7 @@ pub struct GpuOptions<'a> {
     pub threads: usize,
     pub local_work_size: Option<usize>,
     pub global_work_size: Option<usize>,
+    pub iterations: Option<usize>,
     pub matcher: &'a PubkeyMatcher,
     pub generate_key_type: GenerateKeyType,
 }
@@ -30,7 +31,7 @@ impl Gpu {
         unreachable!()
     }
 
-    pub fn global_work_size(&self) -> usize {
+    pub fn work_per_call(&self) -> usize {
         0
     }
 }

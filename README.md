@@ -62,6 +62,9 @@ To change your GPU device, use `--gpu-device [index]`, where `[index]`
 is the index of your GPU starting at 0.
 To change your GPU platform, use `--gpu-platform [index]`.
 
+You can also tune kernel batching with `--gpu-iterations [N]` to run multiple
+iterations per GPU kernel launch (higher values often help modern NVIDIA GPUs).
+
 ## Testing randomness
 
 To test the randomness of seeds from this program, you can use dieharder
