@@ -6,12 +6,14 @@ inline void generate_checksum (uchar checksum[5], const uchar pubkey[32]) {
 	blake2b_final (&state, (__private uchar *) checksum, 5);
 }
 
+#define MAX_PREFIX_LEN 37
+
 __kernel void generate_pubkey (__global unsigned long *result, __global const uchar *key_root, __constant const uchar *pub_req, __constant const uchar *pub_mask, uchar prefix_len, uint iterations, uchar generate_key_type, __constant const uchar *public_offset) {
 	ulong const thread = (ulong)get_global_id (0);
 	uchar seed[32];
 	uchar key[32];
-	uchar req_local[37];
-	uchar mask_local[37];
+	uchar req_local[MAX_PREFIX_LEN];
+	uchar mask_local[MAX_PREFIX_LEN];
 	uchar16 key_chunk0 = vload16(0, key_root);
 	uchar16 key_chunk1 = vload16(1, key_root);
 	vstore16(key_chunk0, 0, seed);
@@ -39,12 +41,16 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 	ulong offset = thread;
 	const bool is_seed = generate_key_type == 1;
 	const bool use_public_offset = generate_key_type == 2;
-	uchar pubkey_prefix_len = prefix_len;
+	uchar bounded_prefix_len = prefix_len;
+	if (bounded_prefix_len > MAX_PREFIX_LEN) {
+		bounded_prefix_len = MAX_PREFIX_LEN;
+	}
+	uchar pubkey_prefix_len = bounded_prefix_len;
 	if (pubkey_prefix_len > 32) {
 		pubkey_prefix_len = 32;
 	}
-	const bool needs_checksum = prefix_len > 32;
-	for (uchar i = 0; i < prefix_len; i++) {
+	const bool needs_checksum = bounded_prefix_len > 32;
+	for (uchar i = 0; i < bounded_prefix_len; i++) {
 		req_local[i] = pub_req[i];
 		mask_local[i] = pub_mask[i];
 	}
@@ -121,7 +127,7 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 		if (matches && needs_checksum) {
 			uchar checksum[5];
 			generate_checksum (checksum, pubkey);
-			for (uchar i = 32; i < prefix_len; i++) {
+			for (uchar i = 32; i < bounded_prefix_len; i++) {
 				if ((checksum[4 - (i - 32)] & mask_local[i]) != req_local[i]) {
 					matches = false;
 					break;
