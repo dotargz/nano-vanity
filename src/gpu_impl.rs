@@ -138,20 +138,26 @@ impl Gpu {
         req_buffer.write(&req_padded).enq()?;
         mask_buffer.write(&mask_padded).enq()?;
         result.write(&[!0u64] as &[u64]).enq()?;
-        let gen_key_type_code: u8 = match opts.generate_key_type {
-            GenerateKeyType::PrivateKey => 0,
-            GenerateKeyType::Seed => 1,
+        let kernel_name = match opts.generate_key_type {
+            GenerateKeyType::PrivateKey => "generate_pubkey_private",
+            GenerateKeyType::Seed => "generate_pubkey_seed",
             GenerateKeyType::ExtendedPrivateKey(offset) => {
                 let compressed = offset.compress();
                 public_offset
                     .write(compressed.as_bytes() as &[u8])
                     .enq()?;
-                2
+                "generate_pubkey_extended"
             }
         };
+        if let GenerateKeyType::ExtendedPrivateKey(_) = opts.generate_key_type {
+        } else {
+            public_offset
+                .write(&[0u8; PUBLIC_OFFSET_LEN] as &[u8])
+                .enq()?;
+        }
 
         let kernel = {
-            let mut kernel_builder = pro_que.kernel_builder("generate_pubkey");
+            let mut kernel_builder = pro_que.kernel_builder(kernel_name);
             kernel_builder
                 .global_work_size(global_work_size)
                 .arg(&result)
@@ -160,7 +166,6 @@ impl Gpu {
                 .arg(&mask_buffer)
                 .arg(prefix_len as u8)
                 .arg(iterations as u32)
-                .arg(gen_key_type_code)
                 .arg(&public_offset);
             if let Some(local_work_size) = local_work_size {
                 kernel_builder.local_work_size(local_work_size);

@@ -18,10 +18,11 @@ pub enum GenerateKeyType {
     ExtendedPrivateKey(EdwardsPoint),
 }
 
-fn ed25519_privkey_to_pubkey(sec: &[u8; 32]) -> [u8; 32] {
-    let mut hasher = Blake2b::default();
+const SEED_ADDRESS_INDEX: [u8; 4] = [0, 0, 0, 0];
+
+fn ed25519_privkey_to_pubkey_with_hasher(hasher: &mut Blake2b, sec: &[u8; 32]) -> [u8; 32] {
     hasher.update(sec);
-    let hash_result = hasher.finalize_fixed();
+    let hash_result = hasher.finalize_fixed_reset();
     let expanded = hash_result.as_slice();
     let mut lower = [0u8; 32];
     lower.copy_from_slice(&expanded[..32]);
@@ -33,17 +34,66 @@ fn ed25519_privkey_to_pubkey(sec: &[u8; 32]) -> [u8; 32] {
     point.compress().to_bytes()
 }
 
+fn ed25519_privkey_to_pubkey(sec: &[u8; 32]) -> [u8; 32] {
+    let mut hasher = Blake2b::default();
+    ed25519_privkey_to_pubkey_with_hasher(&mut hasher, sec)
+}
+
+pub struct SecretHasher {
+    generate_key_type: GenerateKeyType,
+    blake2b: Blake2b,
+    seed_hasher: Option<VarBlake2b>,
+}
+
+impl SecretHasher {
+    pub fn new(generate_key_type: GenerateKeyType) -> SecretHasher {
+        let seed_hasher = if generate_key_type == GenerateKeyType::Seed {
+            Some(VarBlake2b::new(32).unwrap())
+        } else {
+            None
+        };
+        SecretHasher {
+            generate_key_type,
+            blake2b: Blake2b::default(),
+            seed_hasher,
+        }
+    }
+
+    pub fn secret_to_pubkey(&mut self, key_material: [u8; 32]) -> [u8; 32] {
+        match self.generate_key_type {
+            GenerateKeyType::PrivateKey => {
+                ed25519_privkey_to_pubkey_with_hasher(&mut self.blake2b, &key_material)
+            }
+            GenerateKeyType::Seed => {
+                let mut private_key = [0u8; 32];
+                let seed_hasher = self
+                    .seed_hasher
+                    .as_mut()
+                    .expect("Seed hasher was not initialized");
+                seed_hasher.update(&key_material);
+                seed_hasher.update(&SEED_ADDRESS_INDEX);
+                seed_hasher.finalize_variable_reset(|h| private_key.copy_from_slice(h));
+                ed25519_privkey_to_pubkey_with_hasher(&mut self.blake2b, &private_key)
+            }
+            GenerateKeyType::ExtendedPrivateKey(offset) => {
+                let scalar = CurveScalar::from_bytes_mod_order(key_material);
+                let curvepoint = &scalar * &ED25519_BASEPOINT_TABLE;
+                (&curvepoint + &offset).compress().to_bytes()
+            }
+        }
+    }
+}
+
 pub fn secret_to_pubkey(key_material: [u8; 32], generate_key_type: GenerateKeyType) -> [u8; 32] {
     match generate_key_type {
         GenerateKeyType::PrivateKey => ed25519_privkey_to_pubkey(&key_material),
         GenerateKeyType::Seed => {
             // Simple address derivation as defined in https://github.com/marvinroger/nanocurrency-js/blob/v2.0.4/src/keys.ts#L40
             // HD keys are not yet standardized (https://github.com/nanocurrency/raiblocks/issues/601)
-            let address_index = [0, 0, 0, 0];
             let mut private_key = [0u8; 32];
             let mut hasher = VarBlake2b::new(32).unwrap();
             hasher.update(&key_material);
-            hasher.update(&address_index);
+            hasher.update(&SEED_ADDRESS_INDEX);
             hasher.finalize_variable(|h| private_key.copy_from_slice(h));
             ed25519_privkey_to_pubkey(&private_key)
         }

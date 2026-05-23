@@ -11,15 +11,17 @@ extern crate curve25519_dalek;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 
 extern crate blake2;
+use blake2::VarBlake2b;
 extern crate byteorder;
 extern crate clap;
 extern crate digest;
+use digest::VariableOutput;
 extern crate hex;
 extern crate num_cpus;
 
 extern crate rand;
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::rngs::{OsRng, StdRng};
+use rand::{RngCore, SeedableRng};
 
 extern crate num_bigint;
 use num_bigint::BigInt;
@@ -31,7 +33,7 @@ use num_traits::{ToPrimitive, Zero};
 extern crate ocl;
 
 mod derivation;
-use derivation::{pubkey_to_address, secret_to_pubkey, GenerateKeyType, ADDRESS_ALPHABET};
+use derivation::{pubkey_to_address, GenerateKeyType, SecretHasher, ADDRESS_ALPHABET};
 
 mod pubkey_matcher;
 use pubkey_matcher::PubkeyMatcher;
@@ -43,6 +45,7 @@ mod gpu;
 use gpu::{Gpu, GpuOptions};
 
 const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+const ATTEMPT_BATCH: usize = 1024;
 
 fn char_byte_mask(ch: char) -> (u8, u8) {
     if ch == '.' || ch == '*' {
@@ -104,9 +107,18 @@ struct ThreadParams {
     matcher: Arc<PubkeyMatcher>,
 }
 
-fn check_solution(params: &ThreadParams, key_material: [u8; 32]) -> bool {
-    let public_key = secret_to_pubkey(key_material, params.generate_key_type);
-    let matches = params.matcher.matches(&public_key);
+fn check_solution(
+    params: &ThreadParams,
+    key_material: [u8; 32],
+    secret_hasher: &mut SecretHasher,
+    checksum_hasher: Option<&mut VarBlake2b>,
+) -> bool {
+    let public_key = secret_hasher.secret_to_pubkey(key_material);
+    let matches = if let Some(checksum_hasher) = checksum_hasher {
+        params.matcher.matches_with_hasher(&public_key, checksum_hasher)
+    } else {
+        params.matcher.matches(&public_key)
+    };
     if matches {
         if params.output_progress {
             eprintln!("");
@@ -350,7 +362,8 @@ fn run() {
     }
     for _ in 0..threads {
         let mut key_or_seed = [0u8; 32];
-        OsRng.fill_bytes(&mut key_or_seed);
+        let mut rng = StdRng::from_rng(OsRng).expect("Failed to seed RNG");
+        rng.fill_bytes(&mut key_or_seed);
         let params = ThreadParams {
             limit,
             output_progress,
@@ -360,17 +373,43 @@ fn run() {
             found_n: found_n_base.clone(),
             attempts: attempts_base.clone(),
         };
-        thread_handles.push(thread::spawn(move || loop {
-            if check_solution(&params, key_or_seed) {
-                OsRng.fill_bytes(&mut key_or_seed);
+        thread_handles.push(thread::spawn(move || {
+            let mut secret_hasher = SecretHasher::new(params.generate_key_type);
+            let mut checksum_hasher = if params.matcher.prefix_len() > 32 {
+                Some(VarBlake2b::new(5).unwrap())
             } else {
-                if output_progress {
-                    params.attempts.fetch_add(1, atomic::Ordering::Relaxed);
-                }
-                for byte in key_or_seed.iter_mut().rev() {
-                    *byte = byte.wrapping_add(1);
-                    if *byte != 0 {
-                        break;
+                None
+            };
+            let mut attempt_batch = 0usize;
+            loop {
+                if check_solution(
+                    &params,
+                    key_or_seed,
+                    &mut secret_hasher,
+                    checksum_hasher.as_mut(),
+                ) {
+                    if output_progress && attempt_batch != 0 {
+                        params
+                            .attempts
+                            .fetch_add(attempt_batch, atomic::Ordering::Relaxed);
+                        attempt_batch = 0;
+                    }
+                    rng.fill_bytes(&mut key_or_seed);
+                } else {
+                    if output_progress {
+                        attempt_batch += 1;
+                        if attempt_batch >= ATTEMPT_BATCH {
+                            params
+                                .attempts
+                                .fetch_add(attempt_batch, atomic::Ordering::Relaxed);
+                            attempt_batch = 0;
+                        }
+                    }
+                    for byte in key_or_seed.iter_mut().rev() {
+                        *byte = byte.wrapping_add(1);
+                        if *byte != 0 {
+                            break;
+                        }
                     }
                 }
             }
@@ -432,9 +471,16 @@ fn run() {
                 .name("nano-vanity-gpu".to_string())
                 .stack_size(WORKER_STACK_SIZE)
                 .spawn(move || {
+            let mut secret_hasher = SecretHasher::new(params.generate_key_type);
+            let mut checksum_hasher = if params.matcher.prefix_len() > 32 {
+                Some(VarBlake2b::new(5).unwrap())
+            } else {
+                None
+            };
+            let mut rng = StdRng::from_rng(OsRng).expect("Failed to seed RNG");
             let mut found_private_key = [0u8; 32];
             loop {
-                OsRng.fill_bytes(&mut key_base);
+                rng.fill_bytes(&mut key_base);
                 let found = gpu
                     .compute(&mut found_private_key as _, &key_base as _)
                     .expect("Failed to run GPU computation");
@@ -446,7 +492,12 @@ fn run() {
                 if !found {
                     continue;
                 }
-                if !check_solution(&params, found_private_key) {
+                if !check_solution(
+                    &params,
+                    found_private_key,
+                    &mut secret_hasher,
+                    checksum_hasher.as_mut(),
+                ) {
                     eprintln!(
                         "GPU returned non-matching solution: {}",
                         hex::encode_upper(&found_private_key),

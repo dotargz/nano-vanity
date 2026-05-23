@@ -49,6 +49,23 @@ impl PubkeyMatcher {
     }
 
     pub fn matches(&self, pubkey: &[u8; 32]) -> bool {
+        if self.prefix_len > 32 {
+            let mut hasher = VarBlake2b::new(5).unwrap();
+            return self.matches_with_hasher(pubkey, &mut hasher);
+        }
+        for i in 0..cmp::min(self.prefix_len, 32) {
+            if pubkey[i] & self.mask[i] != self.req[i] {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn matches_with_hasher(
+        &self,
+        pubkey: &[u8; 32],
+        checksum_hasher: &mut VarBlake2b,
+    ) -> bool {
         for i in 0..cmp::min(self.prefix_len, 32) {
             if pubkey[i] & self.mask[i] != self.req[i] {
                 return false;
@@ -56,9 +73,8 @@ impl PubkeyMatcher {
         }
         if self.prefix_len > 32 {
             let mut checksum = [0u8; 5];
-            let mut hasher = VarBlake2b::new(checksum.len()).unwrap();
-            hasher.update(pubkey as &[u8]);
-            hasher.finalize_variable(|h| checksum.copy_from_slice(h));
+            checksum_hasher.update(pubkey as &[u8]);
+            checksum_hasher.finalize_variable_reset(|h| checksum.copy_from_slice(h));
             for i in 32..self.prefix_len {
                 if checksum[4 - (i - 32)] & self.mask[i] != self.req[i] {
                     return false;
