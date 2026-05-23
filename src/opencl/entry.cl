@@ -13,25 +13,7 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 	uchar16 key_chunk1 = vload16(1, key_root);
 	vstore16(key_chunk0, 0, key);
 	vstore16(key_chunk1, 1, key);
-#if defined(__ENDIAN_LITTLE__)
-	ulong base = ((ulong)key[0])
-		| ((ulong)key[1] << 8)
-		| ((ulong)key[2] << 16)
-		| ((ulong)key[3] << 24)
-		| ((ulong)key[4] << 32)
-		| ((ulong)key[5] << 40)
-		| ((ulong)key[6] << 48)
-		| ((ulong)key[7] << 56);
-	base += thread;
-	key[0] = (uchar)(base);
-	key[1] = (uchar)(base >> 8);
-	key[2] = (uchar)(base >> 16);
-	key[3] = (uchar)(base >> 24);
-	key[4] = (uchar)(base >> 32);
-	key[5] = (uchar)(base >> 40);
-	key[6] = (uchar)(base >> 48);
-	key[7] = (uchar)(base >> 56);
-#else
+#if defined(__ENDIAN_BIG__)
 	ulong base = ((ulong)key[0] << 56)
 		| ((ulong)key[1] << 48)
 		| ((ulong)key[2] << 40)
@@ -49,6 +31,24 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 	key[2] = (uchar)(base >> 40);
 	key[1] = (uchar)(base >> 48);
 	key[0] = (uchar)(base >> 56);
+#else
+	ulong base = ((ulong)key[0])
+		| ((ulong)key[1] << 8)
+		| ((ulong)key[2] << 16)
+		| ((ulong)key[3] << 24)
+		| ((ulong)key[4] << 32)
+		| ((ulong)key[5] << 40)
+		| ((ulong)key[6] << 48)
+		| ((ulong)key[7] << 56);
+	base += thread;
+	key[0] = (uchar)(base);
+	key[1] = (uchar)(base >> 8);
+	key[2] = (uchar)(base >> 16);
+	key[3] = (uchar)(base >> 24);
+	key[4] = (uchar)(base >> 32);
+	key[5] = (uchar)(base >> 40);
+	key[6] = (uchar)(base >> 48);
+	key[7] = (uchar)(base >> 56);
 #endif
 	if (generate_key_type == 1) {
 		// seed
