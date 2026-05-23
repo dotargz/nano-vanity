@@ -13,6 +13,9 @@ use std::cmp;
 use derivation::GenerateKeyType;
 use gpu::GpuOptions;
 
+// 256 is a common NVIDIA warp-multiple default (8 warps) for good occupancy.
+const NVIDIA_DEFAULT_LOCAL_WORK_SIZE: usize = 256;
+
 pub struct Gpu {
     kernel: ocl::Kernel,
     result: Buffer<u64>,
@@ -66,7 +69,7 @@ impl Gpu {
         let mut local_work_size = opts.local_work_size;
         if local_work_size.is_none() && vendor.to_lowercase().contains("nvidia") {
             if let Ok(max_wg_size) = device.max_wg_size() {
-                let candidate = cmp::min(256, max_wg_size);
+                let candidate = cmp::min(NVIDIA_DEFAULT_LOCAL_WORK_SIZE, max_wg_size);
                 if candidate > 0 {
                     local_work_size = Some(candidate);
                 }
