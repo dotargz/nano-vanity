@@ -6,10 +6,14 @@ inline void generate_checksum (uchar checksum[5], const uchar pubkey[32]) {
 	blake2b_final (&state, (__private uchar *) checksum, 5);
 }
 
-__kernel void generate_pubkey (__global unsigned long *result, __global const uchar *key_root, __global const uchar *pub_req, __global const uchar *pub_mask, uchar prefix_len, uint iterations, uchar generate_key_type, __global const uchar *public_offset) {
+#define MAX_PREFIX_LEN 37
+
+__kernel void generate_pubkey (__global unsigned long *result, __global const uchar *key_root, __constant const uchar *pub_req, __constant const uchar *pub_mask, uchar prefix_len, uint iterations, uchar generate_key_type, __constant const uchar *public_offset) {
 	ulong const thread = (ulong)get_global_id (0);
 	uchar seed[32];
 	uchar key[32];
+	uchar req_local[MAX_PREFIX_LEN];
+	uchar mask_local[MAX_PREFIX_LEN];
 	uchar16 key_chunk0 = vload16(0, key_root);
 	uchar16 key_chunk1 = vload16(1, key_root);
 	vstore16(key_chunk0, 0, seed);
@@ -35,6 +39,30 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 #endif
 	ulong stride = (ulong)get_global_size(0);
 	ulong offset = thread;
+	const bool is_seed = generate_key_type == 1;
+	const bool use_public_offset = generate_key_type == 2;
+	uchar bounded_prefix_len = prefix_len;
+	if (bounded_prefix_len > MAX_PREFIX_LEN) {
+		bounded_prefix_len = MAX_PREFIX_LEN;
+	}
+	uchar pubkey_prefix_len = bounded_prefix_len;
+	if (pubkey_prefix_len > 32) {
+		pubkey_prefix_len = 32;
+	}
+	const bool needs_checksum = bounded_prefix_len > 32;
+	for (uchar i = 0; i < bounded_prefix_len; i++) {
+		req_local[i] = pub_req[i];
+		mask_local[i] = pub_mask[i];
+	}
+	ge25519 ALIGN(16) public_offset_curvepoint;
+	if (use_public_offset) {
+		uchar public_offset_copy[32];
+		uchar16 offset_chunk0 = vload16(0, public_offset);
+		uchar16 offset_chunk1 = vload16(1, public_offset);
+		vstore16(offset_chunk0, 0, public_offset_copy);
+		vstore16(offset_chunk1, 1, public_offset_copy);
+		ge25519_unpack_vartime(&public_offset_curvepoint, public_offset_copy);
+	}
 	for (uint iter = 0; iter < iterations; iter++) {
 		ulong base = base_seed + offset;
 #if defined(__ENDIAN_BIG__)
@@ -57,7 +85,7 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 		seed[7] = (uchar)(base >> 56);
 #endif
 		const uchar *key_input = seed;
-		if (generate_key_type == 1) {
+		if (is_seed) {
 			// seed
 			blake2b_state keystate;
 			blake2b_init (&keystate, sizeof (seed));
@@ -70,7 +98,7 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 		blake2b_state state;
 		bignum256modm a;
 		ge25519 ALIGN(16) A;
-		if (generate_key_type != 2) {
+		if (!use_public_offset) {
 			// key is an ed25519 private key
 			uchar hash[64];
 			blake2b_init (&state, sizeof (hash));
@@ -85,33 +113,23 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 			expand256_modm(a, key_input, 32);
 		}
 		ge25519_scalarmult_base_niels(&A, a);
-		if (generate_key_type == 2) {
-			uchar public_offset_copy[32];
-			for (size_t i = 0; i < 32; i++) {
-				public_offset_copy[i] = public_offset[i];
-			}
-			ge25519 ALIGN(16) public_offset_curvepoint;
-			ge25519_unpack_vartime(&public_offset_curvepoint, public_offset_copy);
+		if (use_public_offset) {
 			ge25519_add(&A, &A, &public_offset_curvepoint);
 		}
 		uchar pubkey[32];
 		ge25519_pack(pubkey, &A);
 		bool matches = true;
-		uchar pubkey_prefix_len = prefix_len;
-		if (pubkey_prefix_len > 32) {
-			pubkey_prefix_len = 32;
-		}
 		for (uchar i = 0; i < pubkey_prefix_len; i++) {
-			if ((pubkey[i] & pub_mask[i]) != pub_req[i]) {
+			if ((pubkey[i] & mask_local[i]) != req_local[i]) {
 				matches = false;
 				break;
 			}
 		}
-		if (matches && prefix_len > 32) {
+		if (matches && needs_checksum) {
 			uchar checksum[5];
 			generate_checksum (checksum, pubkey);
-			for (uchar i = 32; i < prefix_len; i++) {
-				if ((checksum[4 - (i - 32)] & pub_mask[i]) != pub_req[i]) {
+			for (uchar i = 32; i < bounded_prefix_len; i++) {
+				if ((checksum[4 - (i - 32)] & mask_local[i]) != req_local[i]) {
 					matches = false;
 					break;
 				}
