@@ -414,6 +414,7 @@ fn main() {
             generate_key_type: gen_key_ty,
         })
         .unwrap();
+        let gpu_work_size = gpu.global_work_size();
         gpu_thread = Some(thread::spawn(move || {
             let mut found_private_key = [0u8; 32];
             loop {
@@ -424,7 +425,7 @@ fn main() {
                 if output_progress {
                     params
                         .attempts
-                        .fetch_add(gpu_threads, atomic::Ordering::Relaxed);
+                        .fetch_add(gpu_work_size, atomic::Ordering::Relaxed);
                 }
                 if !found {
                     continue;
