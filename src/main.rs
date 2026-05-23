@@ -124,7 +124,7 @@ fn check_solution(params: &ThreadParams, key_material: [u8; 32]) -> bool {
     matches
 }
 
-fn main() {
+fn run() {
     let args = clap::App::new("nano-vanity")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Lee Bousfield <ljbousfield@gmail.com>")
@@ -468,4 +468,14 @@ fn main() {
     }
     eprintln!("No computation devices specified");
     process::exit(1);
+}
+
+fn main() {
+    const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+    let handle = thread::Builder::new()
+        .name("nano-vanity-worker".to_string())
+        .stack_size(WORKER_STACK_SIZE)
+        .spawn(run)
+        .expect("Failed to start worker thread");
+    handle.join().expect("Worker thread panicked");
 }
