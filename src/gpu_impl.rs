@@ -110,11 +110,11 @@ impl Gpu {
             .flags(MemFlags::new().read_only().host_write_only())
             .build()?;
         pro_que.set_dims(MAX_PREFIX_LEN);
-        let req = pro_que
+        let req_buffer = pro_que
             .buffer_builder::<u8>()
             .flags(MemFlags::new().read_only().host_write_only())
             .build()?;
-        let mask = pro_que
+        let mask_buffer = pro_que
             .buffer_builder::<u8>()
             .flags(MemFlags::new().read_only().host_write_only())
             .build()?;
@@ -127,13 +127,16 @@ impl Gpu {
 
         let mut req_padded = vec![0u8; MAX_PREFIX_LEN];
         let mut mask_padded = vec![0u8; MAX_PREFIX_LEN];
-        let req = opts.matcher.req();
-        let mask = opts.matcher.mask();
-        let prefix_len = cmp::min(cmp::min(req.len(), mask.len()), MAX_PREFIX_LEN);
-        req_padded[..prefix_len].copy_from_slice(&req[..prefix_len]);
-        mask_padded[..prefix_len].copy_from_slice(&mask[..prefix_len]);
-        req.write(&req_padded).enq()?;
-        mask.write(&mask_padded).enq()?;
+        let req_slice = opts.matcher.req();
+        let mask_slice = opts.matcher.mask();
+        let prefix_len = cmp::min(
+            cmp::min(req_slice.len(), mask_slice.len()),
+            MAX_PREFIX_LEN,
+        );
+        req_padded[..prefix_len].copy_from_slice(&req_slice[..prefix_len]);
+        mask_padded[..prefix_len].copy_from_slice(&mask_slice[..prefix_len]);
+        req_buffer.write(&req_padded).enq()?;
+        mask_buffer.write(&mask_padded).enq()?;
         result.write(&[!0u64] as &[u64]).enq()?;
         let gen_key_type_code: u8 = match opts.generate_key_type {
             GenerateKeyType::PrivateKey => 0,
@@ -153,8 +156,8 @@ impl Gpu {
                 .global_work_size(global_work_size)
                 .arg(&result)
                 .arg(&key_root)
-                .arg(&req)
-                .arg(&mask)
+                .arg(&req_buffer)
+                .arg(&mask_buffer)
                 .arg(prefix_len as u8)
                 .arg(iterations as u32)
                 .arg(gen_key_type_code)
