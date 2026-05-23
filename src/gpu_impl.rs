@@ -127,9 +127,11 @@ impl Gpu {
 
         let mut req_padded = vec![0u8; MAX_PREFIX_LEN];
         let mut mask_padded = vec![0u8; MAX_PREFIX_LEN];
-        let prefix_len = cmp::min(opts.matcher.prefix_len(), MAX_PREFIX_LEN);
-        req_padded[..prefix_len].copy_from_slice(opts.matcher.req());
-        mask_padded[..prefix_len].copy_from_slice(opts.matcher.mask());
+        let req = opts.matcher.req();
+        let mask = opts.matcher.mask();
+        let prefix_len = cmp::min(cmp::min(req.len(), mask.len()), MAX_PREFIX_LEN);
+        req_padded[..prefix_len].copy_from_slice(&req[..prefix_len]);
+        mask_padded[..prefix_len].copy_from_slice(&mask[..prefix_len]);
         req.write(&req_padded).enq()?;
         mask.write(&mask_padded).enq()?;
         result.write(&[!0u64] as &[u64]).enq()?;

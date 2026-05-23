@@ -57,9 +57,10 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 	ge25519 ALIGN(16) public_offset_curvepoint;
 	if (use_public_offset) {
 		uchar public_offset_copy[32];
-		for (size_t i = 0; i < 32; i++) {
-			public_offset_copy[i] = public_offset[i];
-		}
+		uchar16 offset_chunk0 = vload16(0, public_offset);
+		uchar16 offset_chunk1 = vload16(1, public_offset);
+		vstore16(offset_chunk0, 0, public_offset_copy);
+		vstore16(offset_chunk1, 1, public_offset_copy);
 		ge25519_unpack_vartime(&public_offset_curvepoint, public_offset_copy);
 	}
 	for (uint iter = 0; iter < iterations; iter++) {
