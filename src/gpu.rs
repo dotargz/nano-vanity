@@ -31,10 +31,6 @@ impl Gpu {
         unreachable!()
     }
 
-    pub fn global_work_size(&self) -> usize {
-        0
-    }
-
     pub fn work_per_call(&self) -> usize {
         0
     }

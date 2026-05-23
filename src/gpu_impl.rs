@@ -189,11 +189,6 @@ impl Gpu {
         Ok(success)
     }
 
-    #[allow(dead_code)]
-    pub fn global_work_size(&self) -> usize {
-        self.global_work_size
-    }
-
     pub fn work_per_call(&self) -> usize {
         self.global_work_size.saturating_mul(self.iterations)
     }
