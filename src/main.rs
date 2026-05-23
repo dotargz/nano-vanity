@@ -42,6 +42,8 @@ mod gpu_impl;
 mod gpu;
 use gpu::{Gpu, GpuOptions};
 
+const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+
 fn char_byte_mask(ch: char) -> (u8, u8) {
     if ch == '.' || ch == '*' {
         (0, 0)
@@ -124,7 +126,7 @@ fn check_solution(params: &ThreadParams, key_material: [u8; 32]) -> bool {
     matches
 }
 
-fn main() {
+fn run() {
     let args = clap::App::new("nano-vanity")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Lee Bousfield <ljbousfield@gmail.com>")
@@ -415,7 +417,11 @@ fn main() {
         })
         .unwrap();
         let gpu_work_size = gpu.global_work_size();
-        gpu_thread = Some(thread::spawn(move || {
+        gpu_thread = Some(
+            thread::Builder::new()
+                .name("nano-vanity-gpu".to_string())
+                .stack_size(WORKER_STACK_SIZE)
+                .spawn(move || {
             let mut found_private_key = [0u8; 32];
             loop {
                 OsRng.fill_bytes(&mut key_base);
@@ -440,7 +446,9 @@ fn main() {
                     *byte = 0;
                 }
             }
-        }));
+        })
+        .expect("Failed to start GPU thread"),
+        );
     }
     if output_progress {
         let start_time = Instant::now();
@@ -468,4 +476,13 @@ fn main() {
     }
     eprintln!("No computation devices specified");
     process::exit(1);
+}
+
+fn main() {
+    let handle = thread::Builder::new()
+        .name("nano-vanity-worker".to_string())
+        .stack_size(WORKER_STACK_SIZE)
+        .spawn(run)
+        .expect("Failed to start worker thread");
+    handle.join().expect("Worker thread panicked");
 }
