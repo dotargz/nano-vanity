@@ -21,6 +21,7 @@ pub struct Gpu {
     result: Buffer<u64>,
     key_root: Buffer<u8>,
     global_work_size: usize,
+    iterations: usize,
 }
 
 impl Gpu {
@@ -67,6 +68,14 @@ impl Gpu {
         eprintln!("Initializing GPU {} {}", vendor, name);
         let mut global_work_size = opts.global_work_size.unwrap_or(opts.threads);
         let mut local_work_size = opts.local_work_size;
+        let mut iterations = opts.iterations.unwrap_or_else(|| {
+            if vendor.to_lowercase().contains("nvidia") {
+                4
+            } else {
+                1
+            }
+        });
+        iterations = cmp::max(1, iterations);
         if local_work_size.is_none() && vendor.to_lowercase().contains("nvidia") {
             if let Ok(max_wg_size) = device.max_wg_size() {
                 let candidate = cmp::min(NVIDIA_DEFAULT_LOCAL_WORK_SIZE, max_wg_size);
@@ -134,6 +143,7 @@ impl Gpu {
                 .arg(&req)
                 .arg(&mask)
                 .arg(opts.matcher.prefix_len() as u8)
+                .arg(iterations as u32)
                 .arg(gen_key_type_code)
                 .arg(&public_offset);
             if let Some(local_work_size) = local_work_size {
@@ -147,6 +157,7 @@ impl Gpu {
             result,
             key_root,
             global_work_size,
+            iterations,
         })
     }
 
@@ -165,12 +176,12 @@ impl Gpu {
 
         let mut buf = [0u64];
         self.result.read(&mut buf as &mut [u64]).enq()?;
-        let thread = buf[0];
-        let success = thread != !0u64;
+        let offset = buf[0];
+        let success = offset != !0u64;
         if success {
             self.result.write(&[!0u64] as &[u64]).enq()?;
             let base = NativeEndian::read_u64(key_root);
-            NativeEndian::write_u64(out, base.wrapping_add(thread));
+            NativeEndian::write_u64(out, base.wrapping_add(offset));
             out[8..].copy_from_slice(&key_root[8..]);
         }
         Ok(success)
@@ -178,5 +189,9 @@ impl Gpu {
 
     pub fn global_work_size(&self) -> usize {
         self.global_work_size
+    }
+
+    pub fn work_per_call(&self) -> usize {
+        self.global_work_size().saturating_mul(self.iterations)
     }
 }

@@ -181,6 +181,11 @@ fn run() {
                 .value_name("N")
                 .help("The GPU global work size. Increasing it may increase performance. For advanced users only."),
         ).arg(
+            clap::Arg::with_name("gpu_iterations")
+                .long("gpu-iterations")
+                .value_name("N")
+                .help("Number of iterations per GPU kernel launch (higher reduces launch overhead)"),
+        ).arg(
             clap::Arg::with_name("no_progress")
                 .long("no-progress")
                 .help("Disable progress output"),
@@ -396,6 +401,10 @@ fn run() {
             s.parse()
                 .expect("Failed to parse GPU local work size option")
         });
+        let gpu_iterations = args.value_of("gpu_iterations").map(|s| {
+            s.parse()
+                .expect("Failed to parse GPU iterations option")
+        });
         let mut key_base = [0u8; 32];
         let params = ThreadParams {
             limit,
@@ -412,11 +421,12 @@ fn run() {
             threads: gpu_threads,
             local_work_size: gpu_local_work_size,
             global_work_size: gpu_global_work_size,
+            iterations: gpu_iterations,
             matcher: &params.matcher,
             generate_key_type: gen_key_ty,
         })
         .unwrap();
-        let gpu_work_size = gpu.global_work_size();
+        let gpu_work_per_call = gpu.work_per_call();
         gpu_thread = Some(
             thread::Builder::new()
                 .name("nano-vanity-gpu".to_string())
@@ -431,7 +441,7 @@ fn run() {
                 if output_progress {
                     params
                         .attempts
-                        .fetch_add(gpu_work_size, atomic::Ordering::Relaxed);
+                        .fetch_add(gpu_work_per_call, atomic::Ordering::Relaxed);
                 }
                 if !found {
                     continue;
