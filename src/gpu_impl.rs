@@ -15,6 +15,8 @@ use gpu::GpuOptions;
 
 // 256 is a common NVIDIA warp-multiple default (8 warps) for good occupancy.
 const NVIDIA_DEFAULT_LOCAL_WORK_SIZE: usize = 256;
+const MAX_PREFIX_LEN: usize = 37;
+const PUBLIC_OFFSET_LEN: usize = 32;
 
 pub struct Gpu {
     kernel: ocl::Kernel,
@@ -107,7 +109,7 @@ impl Gpu {
             .buffer_builder::<u8>()
             .flags(MemFlags::new().read_only().host_write_only())
             .build()?;
-        pro_que.set_dims(opts.matcher.prefix_len());
+        pro_que.set_dims(MAX_PREFIX_LEN);
         let req = pro_que
             .buffer_builder::<u8>()
             .flags(MemFlags::new().read_only().host_write_only())
@@ -116,22 +118,29 @@ impl Gpu {
             .buffer_builder::<u8>()
             .flags(MemFlags::new().read_only().host_write_only())
             .build()?;
-        pro_que.set_dims(32);
+        pro_que.set_dims(PUBLIC_OFFSET_LEN);
         let public_offset = pro_que
             .buffer_builder::<u8>()
             .flags(MemFlags::new().read_only().host_write_only())
             .build()?;
         pro_que.set_dims(1);
 
-        req.write(opts.matcher.req()).enq()?;
-        mask.write(opts.matcher.mask()).enq()?;
+        let mut req_padded = vec![0u8; MAX_PREFIX_LEN];
+        let mut mask_padded = vec![0u8; MAX_PREFIX_LEN];
+        let prefix_len = cmp::min(opts.matcher.prefix_len(), MAX_PREFIX_LEN);
+        req_padded[..prefix_len].copy_from_slice(opts.matcher.req());
+        mask_padded[..prefix_len].copy_from_slice(opts.matcher.mask());
+        req.write(&req_padded).enq()?;
+        mask.write(&mask_padded).enq()?;
         result.write(&[!0u64] as &[u64]).enq()?;
         let gen_key_type_code: u8 = match opts.generate_key_type {
             GenerateKeyType::PrivateKey => 0,
             GenerateKeyType::Seed => 1,
             GenerateKeyType::ExtendedPrivateKey(offset) => {
                 let compressed = offset.compress();
-                public_offset.write(compressed.as_bytes() as &[u8]).enq()?;
+                public_offset
+                    .write(compressed.as_bytes() as &[u8])
+                    .enq()?;
                 2
             }
         };
@@ -144,7 +153,7 @@ impl Gpu {
                 .arg(&key_root)
                 .arg(&req)
                 .arg(&mask)
-                .arg(opts.matcher.prefix_len() as u8)
+                .arg(prefix_len as u8)
                 .arg(iterations as u32)
                 .arg(gen_key_type_code)
                 .arg(&public_offset);
