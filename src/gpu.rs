@@ -29,4 +29,8 @@ impl Gpu {
     pub fn compute(&mut self, _: &mut [u8], _: &[u8]) -> Result<bool, String> {
         unreachable!()
     }
+
+    pub fn global_work_size(&self) -> usize {
+        0
+    }
 }

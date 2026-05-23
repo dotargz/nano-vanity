@@ -8,14 +8,19 @@ use ocl::Buffer;
 use ocl::Platform;
 use ocl::ProQue;
 use ocl::Result;
+use std::cmp;
 
 use derivation::GenerateKeyType;
 use gpu::GpuOptions;
+
+// 256 is a common NVIDIA warp-multiple default (8 warps) for good occupancy.
+const NVIDIA_DEFAULT_LOCAL_WORK_SIZE: usize = 256;
 
 pub struct Gpu {
     kernel: ocl::Kernel,
     result: Buffer<u64>,
     key_root: Buffer<u8>,
+    global_work_size: usize,
 }
 
 impl Gpu {
@@ -24,7 +29,11 @@ impl Gpu {
         let namespace_qualifier = if cfg!(feature = "apple") {
             "#define NAMESPACE_QUALIFIER __private\n"
         } else {
-            "#define NAMESPACE_QUALIFIER __generic\n"
+            "#if defined(__opencl_c_generic_address_space) || (defined(__OPENCL_C_VERSION__) && (__OPENCL_C_VERSION__ >= 200))\n\
+#define NAMESPACE_QUALIFIER __generic\n\
+#else\n\
+#define NAMESPACE_QUALIFIER __private\n\
+#endif\n"
         };
         prog_bldr
             .source(namespace_qualifier)
@@ -53,7 +62,30 @@ impl Gpu {
             .build()?;
 
         let device = pro_que.device();
-        eprintln!("Initializing GPU {} {}", device.vendor()?, device.name()?);
+        let vendor = device.vendor()?;
+        let name = device.name()?;
+        eprintln!("Initializing GPU {} {}", vendor, name);
+        let mut global_work_size = opts.global_work_size.unwrap_or(opts.threads);
+        let mut local_work_size = opts.local_work_size;
+        if local_work_size.is_none() && vendor.to_lowercase().contains("nvidia") {
+            if let Ok(max_wg_size) = device.max_wg_size() {
+                let candidate = cmp::min(NVIDIA_DEFAULT_LOCAL_WORK_SIZE, max_wg_size);
+                if candidate > 0 {
+                    local_work_size = Some(candidate);
+                }
+            }
+        }
+        if let Some(local_work_size) = local_work_size {
+            if global_work_size % local_work_size != 0 {
+                let aligned =
+                    ((global_work_size + local_work_size - 1) / local_work_size) * local_work_size;
+                eprintln!(
+                    "Adjusting global work size from {} to {} to match local work size {}",
+                    global_work_size, aligned, local_work_size
+                );
+                global_work_size = aligned;
+            }
+        }
 
         let result = pro_que
             .buffer_builder::<u64>()
@@ -96,7 +128,7 @@ impl Gpu {
         let kernel = {
             let mut kernel_builder = pro_que.kernel_builder("generate_pubkey");
             kernel_builder
-                .global_work_size(opts.threads)
+                .global_work_size(global_work_size)
                 .arg(&result)
                 .arg(&key_root)
                 .arg(&req)
@@ -104,11 +136,8 @@ impl Gpu {
                 .arg(opts.matcher.prefix_len() as u8)
                 .arg(gen_key_type_code)
                 .arg(&public_offset);
-            if let Some(local_work_size) = opts.local_work_size {
+            if let Some(local_work_size) = local_work_size {
                 kernel_builder.local_work_size(local_work_size);
-            }
-            if let Some(global_work_size) = opts.global_work_size {
-                kernel_builder.global_work_size(global_work_size);
             }
             kernel_builder.build()?
         };
@@ -117,6 +146,7 @@ impl Gpu {
             kernel,
             result,
             key_root,
+            global_work_size,
         })
     }
 
@@ -144,5 +174,9 @@ impl Gpu {
             out[8..].copy_from_slice(&key_root[8..]);
         }
         Ok(success)
+    }
+
+    pub fn global_work_size(&self) -> usize {
+        self.global_work_size
     }
 }

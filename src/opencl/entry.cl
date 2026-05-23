@@ -6,13 +6,50 @@ inline void generate_checksum (uchar checksum[5], const uchar pubkey[32]) {
 	blake2b_final (&state, (__private uchar *) checksum, 5);
 }
 
-__kernel void generate_pubkey (__global unsigned long *result, __global uchar *key_root, __global uchar *pub_req, __global uchar *pub_mask, uchar prefix_len, uchar generate_key_type, __global uchar *public_offset) {
-	size_t const thread = get_global_id (0);
+__kernel void generate_pubkey (__global unsigned long *result, __global const uchar *key_root, __global const uchar *pub_req, __global const uchar *pub_mask, uchar prefix_len, uchar generate_key_type, __global const uchar *public_offset) {
+	ulong const thread = (ulong)get_global_id (0);
 	uchar key[32];
-	for (size_t i = 0; i < 32; i++) {
-		key[i] = key_root[i];
-	}
-	*((size_t *) key) += thread;
+	uchar16 key_chunk0 = vload16(0, key_root);
+	uchar16 key_chunk1 = vload16(1, key_root);
+	vstore16(key_chunk0, 0, key);
+	vstore16(key_chunk1, 1, key);
+#if defined(__ENDIAN_BIG__)
+	ulong base = ((ulong)key[0] << 56)
+		| ((ulong)key[1] << 48)
+		| ((ulong)key[2] << 40)
+		| ((ulong)key[3] << 32)
+		| ((ulong)key[4] << 24)
+		| ((ulong)key[5] << 16)
+		| ((ulong)key[6] << 8)
+		| ((ulong)key[7]);
+	base += thread;
+	key[7] = (uchar)(base);
+	key[6] = (uchar)(base >> 8);
+	key[5] = (uchar)(base >> 16);
+	key[4] = (uchar)(base >> 24);
+	key[3] = (uchar)(base >> 32);
+	key[2] = (uchar)(base >> 40);
+	key[1] = (uchar)(base >> 48);
+	key[0] = (uchar)(base >> 56);
+#else
+	ulong base = ((ulong)key[0])
+		| ((ulong)key[1] << 8)
+		| ((ulong)key[2] << 16)
+		| ((ulong)key[3] << 24)
+		| ((ulong)key[4] << 32)
+		| ((ulong)key[5] << 40)
+		| ((ulong)key[6] << 48)
+		| ((ulong)key[7] << 56);
+	base += thread;
+	key[0] = (uchar)(base);
+	key[1] = (uchar)(base >> 8);
+	key[2] = (uchar)(base >> 16);
+	key[3] = (uchar)(base >> 24);
+	key[4] = (uchar)(base >> 32);
+	key[5] = (uchar)(base >> 40);
+	key[6] = (uchar)(base >> 48);
+	key[7] = (uchar)(base >> 56);
+#endif
 	if (generate_key_type == 1) {
 		// seed
 		blake2b_state keystate;
