@@ -149,13 +149,6 @@ impl Gpu {
                 "generate_pubkey_extended"
             }
         };
-        if let GenerateKeyType::ExtendedPrivateKey(_) = opts.generate_key_type {
-        } else {
-            public_offset
-                .write(&[0u8; PUBLIC_OFFSET_LEN] as &[u8])
-                .enq()?;
-        }
-
         let kernel = {
             let mut kernel_builder = pro_que.kernel_builder(kernel_name);
             kernel_builder
@@ -165,8 +158,10 @@ impl Gpu {
                 .arg(&req_buffer)
                 .arg(&mask_buffer)
                 .arg(prefix_len as u8)
-                .arg(iterations as u32)
-                .arg(&public_offset);
+                .arg(iterations as u32);
+            if let GenerateKeyType::ExtendedPrivateKey(_) = opts.generate_key_type {
+                kernel_builder.arg(&public_offset);
+            }
             if let Some(local_work_size) = local_work_size {
                 kernel_builder.local_work_size(local_work_size);
             }

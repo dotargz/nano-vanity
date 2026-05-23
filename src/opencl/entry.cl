@@ -33,7 +33,7 @@ inline bool prefix_matches(
 	return true;
 }
 
-__kernel void generate_pubkey_private (__global unsigned long *result, __global const uchar *key_root, __constant const uchar *pub_req, __constant const uchar *pub_mask, uchar prefix_len, uint iterations, __constant const uchar *public_offset) {
+__kernel void generate_pubkey_private (__global unsigned long *result, __global const uchar *key_root, __constant const uchar *pub_req, __constant const uchar *pub_mask, uchar prefix_len, uint iterations) {
 	ulong const thread = (ulong)get_global_id (0);
 	uchar seed[32];
 	uchar req_local[MAX_PREFIX_LEN];
@@ -76,7 +76,6 @@ __kernel void generate_pubkey_private (__global unsigned long *result, __global 
 		req_local[i] = pub_req[i];
 		mask_local[i] = pub_mask[i];
 	}
-	(void)public_offset;
 	for (uint iter = 0; iter < iterations; iter++) {
 		ulong base = base_seed + offset;
 #if defined(__ENDIAN_BIG__)
@@ -121,7 +120,7 @@ __kernel void generate_pubkey_private (__global unsigned long *result, __global 
 	}
 }
 
-__kernel void generate_pubkey_seed (__global unsigned long *result, __global const uchar *key_root, __constant const uchar *pub_req, __constant const uchar *pub_mask, uchar prefix_len, uint iterations, __constant const uchar *public_offset) {
+__kernel void generate_pubkey_seed (__global unsigned long *result, __global const uchar *key_root, __constant const uchar *pub_req, __constant const uchar *pub_mask, uchar prefix_len, uint iterations) {
 	ulong const thread = (ulong)get_global_id (0);
 	uchar seed[32];
 	uchar key[32];
@@ -165,8 +164,7 @@ __kernel void generate_pubkey_seed (__global unsigned long *result, __global con
 		req_local[i] = pub_req[i];
 		mask_local[i] = pub_mask[i];
 	}
-	(void)public_offset;
-	const uint32_t idx = 0;
+	const uint32_t seed_address_index = 0;
 	for (uint iter = 0; iter < iterations; iter++) {
 		ulong base = base_seed + offset;
 #if defined(__ENDIAN_BIG__)
@@ -191,7 +189,7 @@ __kernel void generate_pubkey_seed (__global unsigned long *result, __global con
 		blake2b_state keystate;
 		blake2b_init (&keystate, sizeof (seed));
 		blake2b_update (&keystate, seed, sizeof (seed));
-		blake2b_update (&keystate, (uchar *) &idx, 4);
+		blake2b_update (&keystate, (uchar *) &seed_address_index, 4);
 		blake2b_final (&keystate, key, sizeof (key));
 		blake2b_state state;
 		bignum256modm a;

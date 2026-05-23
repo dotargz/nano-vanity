@@ -47,7 +47,7 @@ pub struct SecretHasher {
 
 impl SecretHasher {
     pub fn new(generate_key_type: GenerateKeyType) -> SecretHasher {
-        let seed_hasher = if generate_key_type == GenerateKeyType::Seed {
+        let seed_hasher = if let GenerateKeyType::Seed = generate_key_type {
             Some(VarBlake2b::new(32).unwrap())
         } else {
             None

@@ -362,7 +362,9 @@ fn run() {
     }
     for _ in 0..threads {
         let mut key_or_seed = [0u8; 32];
-        let mut rng = StdRng::from_rng(OsRng).expect("Failed to seed RNG");
+        let mut rng = StdRng::from_rng(OsRng).expect(
+            "Failed to seed StdRng from OsRng - system entropy may be unavailable",
+        );
         rng.fill_bytes(&mut key_or_seed);
         let params = ThreadParams {
             limit,
@@ -380,7 +382,7 @@ fn run() {
             } else {
                 None
             };
-            let mut attempt_batch = 0usize;
+            let mut attempts_in_batch = 0usize;
             loop {
                 if check_solution(
                     &params,
@@ -388,21 +390,21 @@ fn run() {
                     &mut secret_hasher,
                     checksum_hasher.as_mut(),
                 ) {
-                    if output_progress && attempt_batch != 0 {
+                    if output_progress && attempts_in_batch != 0 {
                         params
                             .attempts
-                            .fetch_add(attempt_batch, atomic::Ordering::Relaxed);
-                        attempt_batch = 0;
+                            .fetch_add(attempts_in_batch, atomic::Ordering::Relaxed);
+                        attempts_in_batch = 0;
                     }
                     rng.fill_bytes(&mut key_or_seed);
                 } else {
                     if output_progress {
-                        attempt_batch += 1;
-                        if attempt_batch >= ATTEMPT_BATCH {
+                        attempts_in_batch += 1;
+                        if attempts_in_batch >= ATTEMPT_BATCH {
                             params
                                 .attempts
-                                .fetch_add(attempt_batch, atomic::Ordering::Relaxed);
-                            attempt_batch = 0;
+                                .fetch_add(attempts_in_batch, atomic::Ordering::Relaxed);
+                            attempts_in_batch = 0;
                         }
                     }
                     for byte in key_or_seed.iter_mut().rev() {
@@ -477,7 +479,9 @@ fn run() {
             } else {
                 None
             };
-            let mut rng = StdRng::from_rng(OsRng).expect("Failed to seed RNG");
+            let mut rng = StdRng::from_rng(OsRng).expect(
+                "Failed to seed StdRng from OsRng for GPU worker - system entropy may be unavailable",
+            );
             let mut found_private_key = [0u8; 32];
             loop {
                 rng.fill_bytes(&mut key_base);
