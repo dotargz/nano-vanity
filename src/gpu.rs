@@ -11,6 +11,9 @@ pub struct GpuOptions<'a> {
     pub threads: usize,
     pub local_work_size: Option<usize>,
     pub global_work_size: Option<usize>,
+    pub batch_size: Option<usize>,
+    pub profile: bool,
+    pub autotune: bool,
     pub matcher: &'a PubkeyMatcher,
     pub generate_key_type: GenerateKeyType,
 }
