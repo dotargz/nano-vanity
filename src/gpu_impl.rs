@@ -75,7 +75,9 @@ impl Gpu {
                 1
             }
         });
-        iterations = cmp::max(1, iterations);
+        if iterations == 0 {
+            iterations = 1;
+        }
         if local_work_size.is_none() && vendor.to_lowercase().contains("nvidia") {
             if let Ok(max_wg_size) = device.max_wg_size() {
                 let candidate = cmp::min(NVIDIA_DEFAULT_LOCAL_WORK_SIZE, max_wg_size);
@@ -187,11 +189,12 @@ impl Gpu {
         Ok(success)
     }
 
+    #[allow(dead_code)]
     pub fn global_work_size(&self) -> usize {
         self.global_work_size
     }
 
     pub fn work_per_call(&self) -> usize {
-        self.global_work_size().saturating_mul(self.iterations)
+        self.global_work_size.saturating_mul(self.iterations)
     }
 }

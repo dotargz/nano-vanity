@@ -56,7 +56,7 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 		seed[6] = (uchar)(base >> 48);
 		seed[7] = (uchar)(base >> 56);
 #endif
-		const uchar *key_ptr = seed;
+		const uchar *key_material = seed;
 		if (generate_key_type == 1) {
 			// seed
 			blake2b_state keystate;
@@ -65,7 +65,7 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 			uint32_t idx = 0;
 			blake2b_update (&keystate, (uchar *) &idx, 4);
 			blake2b_final (&keystate, key, sizeof (seed));
-			key_ptr = key;
+			key_material = key;
 		}
 		blake2b_state state;
 		bignum256modm a;
@@ -74,7 +74,7 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 			// key is an ed25519 private key
 			uchar hash[64];
 			blake2b_init (&state, sizeof (hash));
-			blake2b_update (&state, key_ptr, 32);
+			blake2b_update (&state, key_material, 32);
 			blake2b_final (&state, hash, sizeof (hash));
 			hash[0] &= 248;
 			hash[31] &= 127;
@@ -82,7 +82,7 @@ __kernel void generate_pubkey (__global unsigned long *result, __global const uc
 			expand256_modm(a, hash, 32);
 		} else {
 			// key is a scalar
-			expand256_modm(a, key_ptr, 32);
+			expand256_modm(a, key_material, 32);
 		}
 		ge25519_scalarmult_base_niels(&A, a);
 		if (generate_key_type == 2) {
