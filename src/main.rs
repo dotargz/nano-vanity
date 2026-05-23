@@ -42,6 +42,8 @@ mod gpu_impl;
 mod gpu;
 use gpu::{Gpu, GpuOptions};
 
+const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+
 fn char_byte_mask(ch: char) -> (u8, u8) {
     if ch == '.' || ch == '*' {
         (0, 0)
@@ -415,7 +417,11 @@ fn run() {
         })
         .unwrap();
         let gpu_work_size = gpu.global_work_size();
-        gpu_thread = Some(thread::spawn(move || {
+        gpu_thread = Some(
+            thread::Builder::new()
+                .name("nano-vanity-gpu".to_string())
+                .stack_size(WORKER_STACK_SIZE)
+                .spawn(move || {
             let mut found_private_key = [0u8; 32];
             loop {
                 OsRng.fill_bytes(&mut key_base);
@@ -440,7 +446,9 @@ fn run() {
                     *byte = 0;
                 }
             }
-        }));
+        })
+        .expect("Failed to start GPU thread"),
+        );
     }
     if output_progress {
         let start_time = Instant::now();
@@ -471,7 +479,6 @@ fn run() {
 }
 
 fn main() {
-    const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
     let handle = thread::Builder::new()
         .name("nano-vanity-worker".to_string())
         .stack_size(WORKER_STACK_SIZE)
